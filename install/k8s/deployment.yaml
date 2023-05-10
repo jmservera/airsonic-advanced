@@ -25,26 +25,17 @@ spec:
               apiVersion: v1
               fieldPath: metadata.name
         - name: spring.datasource.driver-class-name
-          value: com.mysql.jdbc.Driver
+          value: com.mysql.cj.jdbc.Driver
         - name: spring.datasource.url
-          value: jdbc:mysql://airsonicjm.mysql.database.azure.com:3306/airsonic?useSSL=true&sessionVariables=sql_mode=ANSI_QUOTES&jdbcCompliantTruncation=false
+          value: jdbc:mysql://$DATABASE_SERVER_NAME.mysql.database.azure.com:3306/airsonic?serverTimezone=UTC&sslMode=REQUIRED&defaultAuthenticationPlugin=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin&authenticationPlugins=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin
         - name: spring.datasource.username
-          value: airsonicadmin
-        - name: spring.datasource.password
-          value: SuperS3kretPasSw0rd
-        image: jmaksdemos.azurecr.io/airsonic-advanced:0.2
+          value: myIdentity
+        image: $REGISTRY_NAME.azurecr.io/airsonic-advanced:0.4
         imagePullPolicy: Always
         name: airsonic
         ports:
         - containerPort: 4040
           protocol: TCP
-        resources:
-          limits:
-            cpu: "2"
-            memory: 800M
-          requests:
-            cpu: "1"
-            memory: 300M
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
@@ -63,54 +54,11 @@ spec:
         - mountPath: /var/airsonic/playlists
           name: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
           subPath: playlists
-        # - mountPath: /var/airsonic
-        #   name: airsonic-0e13df0a-b7db-7ce0-c4f1-87a8f36c7cef
-        # - mountPath: /mnt/AppSecrets
-        #   name: airsonic
-      dnsPolicy: ClusterFirst
-      nodeSelector:
-        beta.kubernetes.io/os: linux
+      # nodeSelector:
+      #   kubernetes.io/os: linux
       restartPolicy: Always
-      serviceAccount: workload-identity-sa
       serviceAccountName: workload-identity-sa
-      terminationGracePeriodSeconds: 30
       volumes:
       - name: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
         persistentVolumeClaim:
           claimName: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
-      # - name: airsonic-0e13df0a-b7db-7ce0-c4f1-87a8f36c7cef
-      #   persistentVolumeClaim:
-      #     claimName: airsonic-0e13df0a-b7db-7ce0-c4f1-87a8f36c7cef
-      # - azureFile:
-      #     secretName: airsonic-68a261b8-f029-814f-fb44-27e3f0b3dca1-hydration-secret
-      #     shareName: airsonic
-      #   name: airsonic-hydrator
-      # - name: airsonic
-      #   projected:
-      #     defaultMode: 420
-      #     sources:
-      #     - secret:
-      #         name: airsonic-config-secret
-      #     - secret:
-      #         name: airsonic-applicationinsights-secret
-  # updateStrategy:
-  #   rollingUpdate:
-  #     partition: 0
-  #   type: RollingUpdate
----
-apiVersion: v1
-kind: Service
-metadata:
-  finalizers:
-  - service.kubernetes.io/load-balancer-cleanup
-  name: airsonic-svc
-spec:
-  ports:
-  - name: port4040
-    port: 4040
-    protocol: TCP
-    targetPort: 4040
-  selector:
-    app: airsonic
-  sessionAffinity: None
-  type: LoadBalancer
