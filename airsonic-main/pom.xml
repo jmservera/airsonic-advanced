@@ -155,16 +155,17 @@
         <!-- END taglibs -->
 
 <!-- Azure Passwordless for MySQL -->
+<!--
 <dependency>
     <groupId>com.azure</groupId>
     <artifactId>azure-identity-extensions</artifactId>
     <version>1.0.0</version>
-</dependency>
-<!-- <dependency>
+</dependency> -->
+<dependency>
     <groupId>com.azure.spring</groupId>
     <artifactId>spring-cloud-azure-starter-jdbc-mysql</artifactId>
     <version>5.1.0</version>
-</dependency> -->
+</dependency>
 
         <dependency>
             <groupId>org.apache.lucene</groupId>
@@ -566,6 +567,7 @@
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
             <scope>runtime</scope>
+            <version>8.0.30</version>
         </dependency>
         <dependency>
             <groupId>org.mariadb.jdbc</groupId>
