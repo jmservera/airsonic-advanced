@@ -1,5 +1,4 @@
-# Passwordless MySQL in AKS with Workload Identities
-# [DRAFT]
+# Passwordless MySQL in AKS with Workload Identities --DRAFT--
 
 Azure Database for MySQL has a really nice feature that allows you to use a Managed Identity to connect your Spring or Java application to your database, with minimal configuration changes and usually without any code change, just a few lines in your `pom.xml` file and a couple of lines in your `application.properties` file or in your `application.yml` file.
 
