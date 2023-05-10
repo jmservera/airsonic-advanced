@@ -88,14 +88,14 @@ docker push -a myacr.azurecr.io/airsonic-advanced
 
 ## Prepare the database
 
-Setup firewall
-Connect with token
-Create AD User
+* Setup firewall
+* Connect with token
+* Create AD User
 
 ## Prepare the Kubernetes cluster
 
-Update for workload identity
-Create the service account
+* Update for workload identity
+* Create the service account
 
 ## Deploy the application
 
