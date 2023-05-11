@@ -18,7 +18,7 @@ So here's the bill of materials of what we will use in this example:
     * The Azure CLI
     * Docker
     * A Container Registry (ACR)
-    * Java (17) and Maven installed in a machine to build the application.
+    * Java 17 and Maven installed in a machine to build the application (or you can run everything with docker, no need to install anything else)
 * MySQL database:
     * A MySQL Flexible Server.
     * A Managed Identity, needed for setting up AAD authentication, with the following Graph permissions: User.Read.All, GroupMember.Read.All, Application.Read.All. Assigning these permissions is a bit tough because there's no way to add them from the UI and you need some arcane PowerShell commands to do it properly. The good news is that we have a script that will do it for you.
@@ -31,6 +31,18 @@ So here's the bill of materials of what we will use in this example:
 
 ## Building the application
 
+Start with the variables:
+
+```bash
+export GIT_REPO="https://github.com/jmservera/airsonic-advanced.git"
+export GIT_BRANCH=azure_passwordless
+export ACR_NAME=youracrname
+```
+
+```bash
+git clone $GIT_REPO -b $GIT_BRANCH
+```
+
 For this example, I'm going to use an existing application that I configured to use the passwordless approach. The application is a fork of the [Airsonic Advanced][airsonic] project, a music streaming server. I chose this project because it's a Java application that uses a MySQL database, and it's a bit more complex than a simple "Hello World" application.
 
 As I said before, there will be no code changes, but we will need to update and rebuild the application to add the new dependencies. This application uses Spring Boot, so we will need to add the Spring Cloud Azure JDBC dependency to the [`pom.xml`][pomxml] file:
@@ -42,17 +54,6 @@ As I said before, there will be no code changes, but we will need to update and 
     <version>5.1.0</version>
 </dependency>
 ```
-
-And I also needed to update the version of the `mysql-connector-java` dependency to the latest version, 8.0.30 at the time of writing this article.
-
-```xml
-<dependency>
-    <groupId>mysql</groupId>
-    <artifactId>mysql-connector-java</artifactId>
-    <scope>runtime</scope>
-    <version>8.0.30</version>
-</dependency>
-```    
 
 The project comes with an already prepared Dockerfile, but I also had to update to a newer version of the OpenJDK image to use Java 17 because adoptopenjdk is not providing images for Java 17 anymore. I chose to use the [Eclipse Temurin][temurin] images, which are the official images for OpenJDK.
 
@@ -72,12 +73,24 @@ Once everything prepared and with the [Java 17 JDK][openjdk] installed, I ran th
 mvn clean package -DskipTests -P docker
 ```
 
-This will build the application and also a docker image with the application. The image needs to be tagged with the name of the ACR and the name of the application:
+Or, you can use docker to build the application:
+
+```bash
+docker run -it --rm --workdir /src \
+  -v $(pwd):/src:rw \
+  -v /tmp/profile:/root:rw \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  maven:3.9.1-eclipse-temurin-17 \
+  mvn clean package -DskipTests -P docker
+```
+> Some explanation about this command: the `-v $(pwd):/src:rw` provides read write access to the folder where you are running the command, this should be the source code folder that you downloaded from GitHub, `-v /tmp/profile:/root:rw` is used to cache the downloaded references in case you need to run it again, and the modifier `-v /var/run/docker.sock:/var/run/docker.sock` provides access to the your local docker. 
+
+This will build the application and create a docker image with the application. The image needs to be retagged with the name of the ACR to push it to your Azure Container Registry:
 
 ```bash
 docker tag airsonicadvanced/airsonic-advanced:latest \
-    myacr.azurecr.io/airsonic-advanced:0.4
-docker push -a myacr.azurecr.io/airsonic-advanced
+    $(ACR_NAME).azurecr.io/airsonic-advanced:0.4
+docker push -a $(ACR_NAME).azurecr.io/airsonic-advanced
 ```
 
 ## Kubernetes deployment files
