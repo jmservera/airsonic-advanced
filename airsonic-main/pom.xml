@@ -154,18 +154,14 @@
         </dependency>
         <!-- END taglibs -->
 
-<!-- Azure Passwordless for MySQL -->
-<!--
-<dependency>
-    <groupId>com.azure</groupId>
-    <artifactId>azure-identity-extensions</artifactId>
-    <version>1.0.0</version>
-</dependency> -->
-<dependency>
-    <groupId>com.azure.spring</groupId>
-    <artifactId>spring-cloud-azure-starter-jdbc-mysql</artifactId>
-    <version>5.1.0</version>
-</dependency>
+        <!-- Azure Passwordless for MySQL -->
+        <dependency>
+            <groupId>com.azure.spring</groupId>
+            <artifactId>spring-cloud-azure-starter-jdbc-mysql</artifactId>
+            <version>5.1.0</version>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- END Azure Passwordless for MySQL -->
 
         <dependency>
             <groupId>org.apache.lucene</groupId>
