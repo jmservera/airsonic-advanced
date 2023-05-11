@@ -15,10 +15,10 @@ For the Kubernetes part, you will need to have a Kubernetes cluster with the Wor
 So here's the bill of materials of what we will use in this example:
 * General
     * An Azure subscription.
-    * The Azure CLI
-    * Docker
-    * A Container Registry (ACR)
-    * Java 17 and Maven installed in a machine to build the application (or you can run everything with docker, no need to install anything else)
+    * The Azure CLI.
+    * Docker installed in your machine.
+    * A Container Registry (ACR).
+    * Java 17 and Maven installed in a machine to build the application (or you can run everything with docker, no need to install anything else).
 * MySQL database:
     * A MySQL Flexible Server.
     * A Managed Identity, needed for setting up AAD authentication, with the following Graph permissions: User.Read.All, GroupMember.Read.All, Application.Read.All. Assigning these permissions is a bit tough because there's no way to add them from the UI and you need some arcane PowerShell commands to do it properly. The good news is that we have a script that will do it for you.
@@ -27,7 +27,7 @@ So here's the bill of materials of what we will use in this example:
 * Kubernetes cluster:
     * An AKS cluster, we can create it or use an existing one that we will upgrade to enable Workload Identities.
     * Another Managed Identity, this one will be used by the application to connect to the database.
-    * The `kubectl` cli to connect to the cluster and run some commands.
+    * The `kubectl` CLI to connect to the cluster and deploy the application.
 
 ## Building the application
 
@@ -36,7 +36,8 @@ Start with the variables:
 ```bash
 export GIT_REPO="https://github.com/jmservera/airsonic-advanced.git"
 export GIT_BRANCH=azure_passwordless
-export ACR_NAME=youracrname
+
+export ACR_NAME=<Your Azure Container Registry> # The ACR needs to exist
 ```
 
 ```bash
@@ -45,7 +46,7 @@ git clone $GIT_REPO -b $GIT_BRANCH
 
 For this example, I'm going to use an existing application that I configured to use the passwordless approach. The application is a fork of the [Airsonic Advanced][airsonic] project, a music streaming server. I chose this project because it's a Java application that uses a MySQL database, and it's a bit more complex than a simple "Hello World" application.
 
-As I said before, there will be no code changes, but we will need to update and rebuild the application to add the new dependencies. This application uses Spring Boot, so we will need to add the Spring Cloud Azure JDBC dependency to the [`pom.xml`][pomxml] file:
+As I said before, there will be no code changes, but we I had to update the application to add support for passwordless MySQL. This application uses Spring Boot, so I added the Spring Cloud Azure JDBC dependency to the [`pom.xml`][pomxml] file:
 
 ```xml
 <dependency>
@@ -73,7 +74,7 @@ Once everything prepared and with the [Java 17 JDK][openjdk] installed, I ran th
 mvn clean package -DskipTests -P docker
 ```
 
-Or, you can use docker to build the application:
+You can also use docker to build the application:
 
 ```bash
 docker run -it --rm --workdir /src \
@@ -83,6 +84,7 @@ docker run -it --rm --workdir /src \
   maven:3.9.1-eclipse-temurin-17 \
   mvn clean package -DskipTests -P docker
 ```
+
 > Some explanation about this command: the `-v $(pwd):/src:rw` provides read write access to the folder where you are running the command, this should be the source code folder that you downloaded from GitHub, `-v /tmp/profile:/root:rw` is used to cache the downloaded references in case you need to run it again, and the modifier `-v /var/run/docker.sock:/var/run/docker.sock` provides access to the your local docker. 
 
 This will build the application and create a docker image with the application. The image needs to be retagged with the name of the ACR to push it to your Azure Container Registry:
