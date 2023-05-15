@@ -31,17 +31,14 @@ So here's the bill of materials of what we will use in this example:
 
 ## Building the application
 
-Start with the variables:
-
 ```bash
-export GIT_REPO="https://github.com/jmservera/airsonic-advanced.git"
-export GIT_BRANCH=azure_passwordless
-
-export ACR_NAME=<Your Azure Container Registry> # The ACR needs to exist
+git clone "https://github.com/jmservera/airsonic-advanced.git" -b azure_passwordless
 ```
 
+Start with the variables, you can create a .env file with this structure ([see the .env-demo file](./.env-demo)):
+
 ```bash
-git clone $GIT_REPO -b $GIT_BRANCH
+ACR_NAME=<Your Azure Container Registry> # The ACR needs to exist
 ```
 
 For this example, I'm going to use an existing application that I configured to use the passwordless approach. The application is a fork of the [Airsonic Advanced][airsonic] project, a music streaming server. I chose this project because it's a Java application that uses a MySQL database, and it's a bit more complex than a simple "Hello World" application.
