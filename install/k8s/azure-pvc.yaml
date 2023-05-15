@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-    name: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
+    name: airsonic-data
 spec:
   accessModes:
-  - ReadWriteOnce
+  - ReadWriteMany
   storageClassName: managed-csi
   resources:
     requests:

@@ -155,3 +155,4 @@ local.properties
 
 # Code Recommenders
 .recommenders/
+install/k8s/.env
