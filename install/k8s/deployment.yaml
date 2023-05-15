@@ -1,64 +1,67 @@
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   labels:
     app: airsonic
-  name: airsonic-sts
+  name: airsonic-deployment
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: airsonic
-  serviceName: airsonic-svc
   template:
     metadata:
       labels:
         app: airsonic
         azure.workload.identity/use: "true"
-      name: airsonic-sts
+      name: airsonic-deployment
     spec:
       containers:
-      - env:
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              apiVersion: v1
-              fieldPath: metadata.name
-        - name: spring.datasource.driver-class-name
-          value: com.mysql.cj.jdbc.Driver
-        - name: spring.datasource.url
-          value: jdbc:mysql://$DATABASE_SERVER_NAME.mysql.database.azure.com:3306/airsonic?serverTimezone=UTC&sslMode=REQUIRED&defaultAuthenticationPlugin=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin&authenticationPlugins=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin
-        - name: spring.datasource.username
-          value: myIdentity
-        image: $REGISTRY_NAME.azurecr.io/airsonic-advanced:0.4
-        imagePullPolicy: Always
-        name: airsonic
-        ports:
-        - containerPort: 4040
-          protocol: TCP
-        terminationMessagePath: /dev/termination-log
-        terminationMessagePolicy: FallbackToLogsOnError
-        volumeMounts:
-        - mountPath: /var/airsonic/music
-          name: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
-          subPath: music
-        - mountPath: /var/music
-          name: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
-          subPath: music
-        - mountPath: /var/airsonic/podcasts
-          name: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
-          subPath: podcasts
-        - mountPath: /var/podcasts
-          name: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
-          subPath: podcasts
-        - mountPath: /var/airsonic/playlists
-          name: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
-          subPath: playlists
+        - env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: spring.datasource.driver-class-name
+              value: com.mysql.cj.jdbc.Driver
+            - name: spring.datasource.url
+              value: jdbc:mysql://airsonicjm.mysql.database.azure.com:3306/airsonic?serverTimezone=UTC&sslMode=REQUIRED&defaultAuthenticationPlugin=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin&authenticationPlugins=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin
+            - name: spring.datasource.username
+              value: jmaksIdentity
+          image: jmaksdemos.azurecr.io/airsonic-advanced:0.4
+          imagePullPolicy: Always
+          name: airsonic
+          ports:
+            - containerPort: 4040
+              protocol: TCP
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+          - mountPath: /var/airsonic/music
+            name: airsonic-data
+            subPath: music
+          - mountPath: /var/music
+            name: airsonic-data
+            subPath: music
+          - mountPath: /var/airsonic/podcasts
+            name: airsonic-data
+            subPath: podcasts
+          - mountPath: /var/podcasts
+            name: airsonic-data
+            subPath: podcasts
+          - mountPath: /var/airsonic/playlists
+            name: airsonic-data
+            subPath: playlists
       # nodeSelector:
-      #   kubernetes.io/os: linux
+      # kubernetes.io/os: linux
+
       restartPolicy: Always
+
       serviceAccountName: workload-identity-sa
+
       volumes:
-      - name: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
+      - name: airsonic-data
         persistentVolumeClaim:
-          claimName: airsonic-9c07c78d-07c0-621c-b744-50eccae3acec
+          claimName: airsonic-data
+
