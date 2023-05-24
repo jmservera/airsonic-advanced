@@ -1,8 +1,14 @@
 # Passwordless MySQL in AKS with Workload Identities --DRAFT--
 
-Azure Database for MySQL has a really nice feature that allows you to use a Managed Identity to connect your Spring or Java application to your database, with minimal configuration changes and usually without any code change, just a few lines in your `pom.xml` file and a couple of lines in your `application.properties` file or in your `application.yml` file.
+In this guide we will go through the steps to set up a MySQL database in Azure Database for MySQL Flexible Server, and connect to it from an application running in an Azure Kubernetes Service (AKS) cluster, using the passwordless approach. This approach uses Azure Active Directory (AAD) authentication to connect to the database.
+
+With Azure Database for MySQL you can use a Managed Identity to connect your Spring or Java application to your database using a [passwordless connection][passwordless_mysql]. You can achieve this with minimal configuration changes and usually without any code change, just a few lines in your `pom.xml` file and a couple of lines in your `application.properties` file or in your `application.yml` file.
 
 If you run your app in a Kubernetes cluster, you can use [Workload Identities][workload-identity] to connect to your database without having to store any credentials in your code or in your cluster.
+
+Let's use this two features to connect our application to our database without having to store any credentials in our code or in our cluster.
+
+![Airsonic app with no password in the JDBC config][airsonic_no_pwd]
 
 ## What will you need?
 
@@ -181,15 +187,18 @@ But as it’s using Spring boot it should be this other one:
 
 ## References
 
-* https://learn.microsoft.com/en-us/azure/developer/java/spring-framework/migrate-mysql-to-passwordless-connection?tabs=sign-in-azure-cli%2Cspring%2Caks
+* https://learn.microsoft.com/azure/developer/java/spring-framework/migrate-mysql-to-passwordless-connection?tabs=sign-in-azure-cli%2Cspring%2Caks
 * https://techcommunity.microsoft.com/t5/azure-database-for-mysql-blog/azure-ad-authentication-for-mysql-flexible-server-from-end-to/ba-p/3696353
-* https://learn.microsoft.com/en-us/azure/aks/workload-identity-overview
-* intro: https://learn.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/overview
+* https://learn.microsoft.com/azure/aks/workload-identity-overview
+* intro: https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/overview
 
 [aadauth-mysql]: https://techcommunity.microsoft.com/t5/azure-database-for-mysql-blog/azure-ad-authentication-for-mysql-flexible-server-from-end-to/ba-p/3696353
 [airsonic]: https://github.com/jmservera/airsonic-advanced/tree/azure_passwordless
-[aks-wi]: https://learn.microsoft.com/en-us/azure/aks/workload-identity-overview
+[aks-wi]: https://learn.microsoft.com/azure/aks/workload-identity-overview
 [openjdk]: https://jdk.java.net/archive/
+[passwordless_mysql]: https://learn.microsoft.com/azure/developer/java/spring-framework/migrate-mysql-to-passwordless-connection
 [pomxml]: https://github.com/jmservera/airsonic-advanced/blob/azure_passwordless/airsonic-main/pom.xml
 [temurin]: https://hub.docker.com/_/eclipse-temurin
-[workload-identity]: https://learn.microsoft.com/en-us/azure/aks/workload-identity-overview
+[workload-identity]: https://learn.microsoft.com/azure/aks/workload-identity-overview
+
+[airsonic_no_pwd]: ./img/look_ma_no_passwords.png "Look ma. No passwords!"
