@@ -67,6 +67,8 @@ login(){
         echo "[${FUNCNAME[0]}] Already logged in as $CURRENT_USERNAME"
     fi
 
+    CURRENT_USER_OBJECTID=$(az ad signed-in-user show --query id -o tsv)
+
     if [ ! -z "$SUBSCRIPTION_ID" ]
     then
         echo "[${FUNCNAME[0]}] Setting subscription to $SUBSCRIPTION_ID"
@@ -155,7 +157,7 @@ prepare_aks(){
 
     echo "[${FUNCNAME[0]}] Add support for workload identity"
     WI_ENABLED=$(az aks show -n ${AKS_CLUSTER} -g ${RESOURCE_GROUP} --query "securityProfile.workloadIdentity.enabled" -o tsv)
-    OIDC_ENABLED=$( az aks show -n "jmaksdemos" -g "aks-demos" --query "oidcIssuerProfile.enabled" -o tsv)
+    OIDC_ENABLED=$( az aks show -n ${AKS_CLUSTER} -g ${RESOURCE_GROUP} --query "oidcIssuerProfile.enabled" -o tsv)
     if [ "$WI_ENABLED" = "true" ] && [ "$OIDC_ENABLED" = "true" ]
     then
         echo "[${FUNCNAME[0]}] Workload identity already enabled"
@@ -181,6 +183,20 @@ add_permissions_to_managed_identity(){
 }
 
 prepare_sql () {
+    echo "[${FUNCNAME[0]}] Add mysql server identities"
+
+    az mysql flexible-server identity assign \
+        --resource-group $RESOURCE_GROUP \
+        --server-name $MYSQL_SERVER_NAME \
+        --identity $MYSQL_MANAGED_IDENTITY_NAME
+
+    az mysql flexible-server ad-admin create \
+        --resource-group $RESOURCE_GROUP \
+        --server-name $MYSQL_SERVER_NAME \
+        --display-name $CURRENT_USERNAME \
+        --object-id $CURRENT_USER_OBJECTID \
+        --identity $MYSQL_MANAGED_IDENTITY_NAME
+
     echo "[${FUNCNAME[0]}] Create managed identity for mysql"
     add_permissions_to_managed_identity
     echo "[${FUNCNAME[0]}] Create user in mysql"
