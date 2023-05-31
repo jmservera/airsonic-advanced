@@ -4,7 +4,7 @@ install_tools(){
         sudo apt-get update
         sudo apt-get install -y jq
     else
-        echo "jq already installed"
+        echo "[${FUNCNAME[0]}] jq already installed"
     fi
 }
 
@@ -13,7 +13,7 @@ install_az_cli(){
     then
         curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
     else
-        echo "Azure CLI already installed"
+        echo "[${FUNCNAME[0]}] Azure CLI already installed"
     fi
 }
 
@@ -35,12 +35,12 @@ install_powershell(){
         # Install PowerShell
         sudo apt-get install -y powershell
     else
-        echo "Powershell already installed"
+        echo "[${FUNCNAME[0]}] Powershell already installed"
     fi
 }
 
 install_azureadmodule(){
-    echo "Installing Microsoft.Graph module"
+    echo "[${FUNCNAME[0]}] Installing Microsoft.Graph module"
     pwsh -Command "If(-not(Get-InstalledModule Microsoft.Graph -ErrorAction silentlycontinue)){Install-Module Microsoft.Graph -Confirm:\$False -Force}"
 }
 
