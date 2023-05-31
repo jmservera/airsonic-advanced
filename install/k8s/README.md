@@ -94,15 +94,9 @@ This will build the application and create a docker image with the application. 
 
 ```bash
 docker tag airsonicadvanced/airsonic-advanced:latest \
-    $(ACR_NAME).azurecr.io/airsonic-advanced:0.4
-docker push -a $(ACR_NAME).azurecr.io/airsonic-advanced
+    ${ACR_NAME}.azurecr.io/airsonic-advanced:${VERSION}
+docker push -a ${ACR_NAME}.azurecr.io/airsonic-advanced
 ```
-
-## Kubernetes deployment files
-
-* PVC
-* Deployment
-* Service
 
 ## Prepare the database
 
@@ -119,6 +113,10 @@ docker push -a $(ACR_NAME).azurecr.io/airsonic-advanced
 
 * Create the service account for the Workload Identity.
 * Modify the deployment to use the service account and move to passwordless.
+
+* PVC
+* Deployment
+* Service
 
 ## Common errors
 
@@ -153,7 +151,12 @@ java.sql.SQLException: Access denied for user 'myIdentity'@'52.151.238.80' (usin
         at com.zaxxer.hikari.pool.PoolBase.newConnection(PoolBase.java:364) ~[HikariCP-4.0.3.jar:na]
 ```
 
-You probably did a small mistake when setting up the identity. This is a very generic message that can happen due multiple reasons, in my case I had two issues: a typo and a wrong reference.
+You probably did a small mistake when setting up the identity. This is a very
+generic message that can happen due multiple reasons, in my case I identified
+three different issues: a typo in the identity name, a wrong library reference
+and a wrong namespace. These three mistakes cause the same error message so it's
+not easy to identify the root cause.
+
 
 #### Remember case-sensitivity
 
@@ -161,11 +164,12 @@ First, the identity was created with a capital `I`  in `myIdentity`, but then I
 created the service account and the user with a lowercase letter like
 `myidentity`. So nobody knew who was the right user.
 
+
 #### Are you referencing the right library?
 
 Another big mistake was that I used the wrong library. I was using a Spring Boot
 application, but as per the previous mistake, my solution was not working, I
-moved back to use a plain Java library instead of the Spring one.
+moved back to try to use a plain Java library instead of the Spring one.
 
 ```xml
 <dependency>
@@ -175,7 +179,9 @@ moved back to use a plain Java library instead of the Spring one.
 </dependency>
 ```
 
-But as it’s using Spring boot it should be this other one:
+But as it’s using Spring boot it should be this other one, that takes care of
+all the magic that gets the token from the identity and injects it into the
+connection string:
 
 ```xml
 <dependency>
@@ -184,6 +190,21 @@ But as it’s using Spring boot it should be this other one:
     <version>5.1.0</version>
 </dependency>
 ```
+
+
+#### It's the Namespace!
+
+The last mistake was that I was using the wrong namespace. I was creating too
+many things manually and I was creating the deployment in the application
+namespace, called `airsonic`, but the federated identity was created in the
+`default` namespace. It is an important setting that is in the `subject`that 
+you pass to the `az identity federated-credential create` command.
+
+```bash
+az identity federated-credential create --name ${FEDERATED_IDENTITY_CREDENTIAL_NAME} --identity-name ${WORKLOAD_IDENTITY_NAME} --resource-group ${RESOURCE_GROUP} --issuer ${AKS_OIDC_ISSUER} --subject system:serviceaccount:${KUBERNETES_NAMESPACE}:${SERVICE_ACCOUNT_NAME}
+```
+
+
 
 ## References
 
