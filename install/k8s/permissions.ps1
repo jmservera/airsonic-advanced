@@ -5,11 +5,14 @@
     https://techcommunity.microsoft.com/t5/azure-database-for-mysql-blog/azure-ad-authentication-for-mysql-flexible-server-from-end-to/ba-p/3696353
 #>
 param(
+    [Parameter(Mandatory=$false, ValueFromPipeline=$true)]
     # The tenant ID of the Azure AD tenant where the User Managed Identity gets permissions
     [String]$TenantId,
     # The name of the User Managed Identity service principal
+    [Parameter(Mandatory=$false, ValueFromPipeline=$true)]
     [String]$UmiName,
     # A token to authenticate to Azure AD, if not provided, the script will prompt for credentials
+    [Parameter(Mandatory=$false, ValueFromPipeline=$true)]
     [String]$Token)
 
 
@@ -36,6 +39,7 @@ while(!$isGlobalAdmin){
     Write-Host "isGlobalAdmin: $isGlobalAdmin"
     if(!$isGlobalAdmin){
         Write-Host "You need to be a Global Administrator to run this script, please login again with a Global Administrator account"
+        Disconnect-MgGraph
         Connect-MgGraph -TenantId $TenantId -Scopes $scopes
     }    
 }
