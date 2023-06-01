@@ -106,10 +106,10 @@ login(){
 # the mysql server identity is needed to be able to assign the workload identity
 create_identities(){
     echo "[${FUNCNAME[0]}] Create mysql managed identity for the service"
-    MUI=$(az identity show -g $RESOURCE_GROUP -n "$MYSQL_MANAGED_IDENTITY_NAME" --query "principalId" -o tsv)
-    if [ -z "$MUI" ]
+    export UMI=$(az identity show -g $RESOURCE_GROUP -n "$MYSQL_MANAGED_IDENTITY_NAME" --query "principalId" -o tsv)
+    if [ -z "$UMI" ]
     then
-        az identity create -g $RESOURCE_GROUP -n "$MYSQL_MANAGED_IDENTITY_NAME"
+        export UMI=$(az identity create -g $RESOURCE_GROUP -n "$MYSQL_MANAGED_IDENTITY_NAME" --query "principalId" -o tsv)
     else
         echo "[${FUNCNAME[0]}] Managed identity already exists"
     fi
@@ -191,7 +191,7 @@ prepare_workload_identity(){
                                    --query "oidcIssuerProfile.issuerUrl" \
                                    -o tsv)"
     export WORKLOAD_IDENTITY_ID=$(az identity show \
-                                    -g ${MYSQL_SERVER_RESOURCE_GROUP} \
+                                    -g ${RESOURCE_GROUP} \
                                     -n ${WORKLOAD_IDENTITY_NAME} \
                                     --query "clientId" \
                                     -o tsv)
@@ -212,44 +212,107 @@ add_permissions_to_managed_identity(){
                 --query accessToken \
                 --scope https://graph.microsoft.com/.default \
                 -o tsv)
-    pwsh -c "./permissions.ps1 -TenantId '${TENANT_ID}' -UmiName '${MYSQL_MANAGED_IDENTITY_NAME}' -Token '${TOKEN}'"
+    pwsh -c "./permissions.ps1 -TenantId '${TENANT_ID}' -UmiId '${UMI}' -Token '${TOKEN}'"
 }
 
 prepare_sql () {
     echo "[${FUNCNAME[0]}] Add mysql server identities"
 
-    az mysql flexible-server identity assign \
-        --resource-group $RESOURCE_GROUP \
-        --server-name $MYSQL_SERVER_NAME \
-        --identity $MYSQL_MANAGED_IDENTITY_NAME
+    id=$(az mysql flexible-server identity show \
+            --resource-group $RESOURCE_GROUP \
+            --server-name $MYSQL_SERVER_NAME \
+            --identity $MYSQL_MANAGED_IDENTITY_NAME \
+            --query principalId \
+            -o tsv)
 
-    az mysql flexible-server ad-admin create \
-        --resource-group $RESOURCE_GROUP \
-        --server-name $MYSQL_SERVER_NAME \
-        --display-name $CURRENT_USERNAME \
-        --object-id $CURRENT_USER_OBJECTID \
-        --identity $MYSQL_MANAGED_IDENTITY_NAME
+    echo "[${FUNCNAME[0]}] Managed Identity assignment"
+    if [ -z "$id" ]
+    then
+        az mysql flexible-server identity assign \
+            --resource-group $RESOURCE_GROUP \
+            --server-name $MYSQL_SERVER_NAME \
+            --identity $MYSQL_MANAGED_IDENTITY_NAME
+    else
+        echo "[${FUNCNAME[0]}] Managed identity already assigned"
+    fi
+
+    echo "[${FUNCNAME[0]}] Admin user assignment"
+    login=$(az mysql flexible-server ad-admin show \
+                --resource-group $RESOURCE_GROUP \
+                --server-name $MYSQL_SERVER_NAME \
+                --query login \
+                -o tsv)
+
+    if [ "$CURRENT_USERNAME" != "$login" ]
+    then
+        az mysql flexible-server ad-admin create \
+            --resource-group $RESOURCE_GROUP \
+            --server-name $MYSQL_SERVER_NAME \
+            --display-name $CURRENT_USERNAME \
+            --object-id $CURRENT_USER_OBJECTID \
+            --identity $MYSQL_MANAGED_IDENTITY_NAME
+    else
+        echo "[${FUNCNAME[0]}] Admin user already assigned"
+    fi
 
     MY_IP=$(curl -s ifconfig.me)
-    echo "[${FUNCNAME[0]}] Add firewall rules for mysql server for $MY_IP"    
-    az mysql flexible-server firewall-rule create \
-        --resource-group $RESOURCE_GROUP \
-        --rule-name "${MYSQL_SERVER_NAME}-database-allow-local-ip-wsl" \
-        --name "$MYSQL_SERVER_NAME" \
-        --start-ip-address "$MY_IP" \
-        --end-ip-address "$MY_IP" \
-        --output tsv
+    echo "[${FUNCNAME[0]}] Add firewall rules for mysql server for $MY_IP"
+    IP=$(az mysql flexible-server firewall-rule show \
+                --resource-group $RESOURCE_GROUP \
+                --rule-name "${MYSQL_SERVER_NAME}-database-allow-local-ip-wsl" \
+                --name "$MYSQL_SERVER_NAME" \
+                --query startIpAddress \
+                -o tsv)
+    if [ "$IP" != "$MY_IP" ]
+    then   
+        az mysql flexible-server firewall-rule create \
+            --resource-group $RESOURCE_GROUP \
+            --rule-name "${MYSQL_SERVER_NAME}-database-allow-local-ip-wsl" \
+            --name "$MYSQL_SERVER_NAME" \
+            --start-ip-address "$MY_IP" \
+            --end-ip-address "$MY_IP"
+    else
+        echo "[${FUNCNAME[0]}] Firewall rule for local ip already present"
+    fi
+
+    echo "[${FUNCNAME[0]}] Add firewall rules for mysql server for azure services"
+    IP=$(az mysql flexible-server firewall-rule show \
+                --resource-group $RESOURCE_GROUP \
+                --rule-name "${MYSQL_SERVER_NAME}-database-allow-azure" \
+                --name "$MYSQL_SERVER_NAME" \
+                --query startIpAddress \
+                -o tsv)
+    if [ "$IP" != "0.0.0.0" ]
+    then
+        az mysql flexible-server firewall-rule create \
+            --resource-group $RESOURCE_GROUP \
+            --rule-name "${MYSQL_SERVER_NAME}-database-allow-azure" \
+            --name "$MYSQL_SERVER_NAME" \
+            --start-ip-address "0.0.0.0"
+    else
+        echo "[${FUNCNAME[0]}] Firewall rule for azure services already present"
+    fi
 
 
-    echo "[${FUNCNAME[0]}] Create managed identity for mysql"
+    echo "[${FUNCNAME[0]}] Add needed permissions to the managed identity for mysql"
     add_permissions_to_managed_identity
     echo "[${FUNCNAME[0]}] Create user in mysql"
     # using a temporary file because the --querytext parameter in the az cli gives a syntax error
     (envsubst < create_ad_user.sql) > /tmp/create_ad_user.sql
 
+    TOKEN=$(az account get-access-token \
+                --resource-type oss-rdbms \
+                --output tsv \
+                --query accessToken)
     az mysql flexible-server execute \
         --admin-user $CURRENT_USERNAME \
-        --admin-password "$(az account get-access-token --resource-type oss-rdbms --output tsv --query accessToken)" \
+        --admin-password "$TOKEN" \
+        --name $MYSQL_SERVER_NAME \
+        --querytext "CREATE DATABASE IF NOT EXISTS $MYSQL_DATABASE_NAME;"
+
+    az mysql flexible-server execute \
+        --admin-user $CURRENT_USERNAME \
+        --admin-password "$TOKEN" \
         --name $MYSQL_SERVER_NAME \
         -f /tmp/create_ad_user.sql
 
@@ -259,7 +322,9 @@ prepare_sql () {
 deploy_to_aks(){
     pushd templates
 
-    kubectl create namespace ${KUBERNETES_NAMESPACE}
+    echo "[${FUNCNAME[0]}] Create namespace"
+    envsubst < ns.yaml | kubectl apply -f -
+
     echo "[${FUNCNAME[0]}] Create secrets"
     export MYSQL_URL="jdbc:mysql://${MYSQL_SERVER_NAME_FULL}:3306/${MYSQL_DATABASE_NAME}?sslMode=REQUIRED&defaultAuthenticationPlugin=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin&authenticationPlugins=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin"
     envsubst < secrets.yaml | kubectl apply -f -
@@ -275,7 +340,9 @@ deploy_to_aks(){
 
     echo "[${FUNCNAME[0]}] Create service"
     envsubst < service.yaml | kubectl apply -f -
-    kubectl get pods -w
+
+    echo "[${FUNCNAME[0]}] Wait for pods to be ready"
+    kubectl get pods -n $KUBERNETES_NAMESPACE -w
 
     popd
 }    
@@ -288,9 +355,9 @@ prepare_azcli
 login
 # creates the two identities needed for mysql
 create_identities
-# builds the java with maven and creates the container
+# # builds the java with maven and creates the container
 prepare_container
-# prepare the AKS cluster for using workload identities
+# # prepare the AKS cluster for using workload identities
 prepare_aks
 # prepare the workload identity and federated identity
 prepare_workload_identity

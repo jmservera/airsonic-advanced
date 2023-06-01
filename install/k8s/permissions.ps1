@@ -8,9 +8,9 @@ param(
     [Parameter(Mandatory=$false, ValueFromPipeline=$true)]
     # The tenant ID of the Azure AD tenant where the User Managed Identity gets permissions
     [String]$TenantId,
-    # The name of the User Managed Identity service principal
+    # The principal ID of the User Managed Identity service principal
     [Parameter(Mandatory=$false, ValueFromPipeline=$true)]
-    [String]$UmiName,
+    [String]$UmiId,
     # A token to authenticate to Azure AD, if not provided, the script will prompt for credentials
     [Parameter(Mandatory=$false, ValueFromPipeline=$true)]
     [String]$Token)
@@ -29,7 +29,6 @@ else{
 }
 
 $isGlobalAdmin = $false
-Connect-MgGraph -AccessToken $Token
 while(!$isGlobalAdmin){
     $usrId=(get-mguser -Filter "UserPrincipalName eq '$($(get-mgcontext).Account)'").Id
     if($usrId -ne $null){
@@ -44,13 +43,15 @@ while(!$isGlobalAdmin){
     }    
 }
 
-$umi = (Get-MgServicePrincipal -Filter "displayName eq '$UmiName'")
-
 $graphsp = Get-MgServicePrincipal -Filter "appId eq '$graphappid'"
 
 $approles = $graphsp.AppRoles | Where-Object {$_.Value -in ($permissions) -and $_.AllowedMemberTypes -contains "Application"}
-
 foreach ($approle in $approles)
 {
-    New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $umi.Id -PrincipalId $umi.Id -ResourceId $graphsp.Id -AppRoleId $approle.Id
+    $test=(Get-MgServicePrincipalAppRoleAssignment -serviceprincipalid $umiid | Where-Object {$_.AppRoleId -eq $approle.Id})
+    if($test -ne $null){
+        Write-Host "AppRoleAssignment already exists for role '$($approle.DisplayName)'"
+        continue
+    }
+    New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $UmiId -PrincipalId $UmiId -ResourceId $graphsp.Id -AppRoleId $approle.Id
 }
