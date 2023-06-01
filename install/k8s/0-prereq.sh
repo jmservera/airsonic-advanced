@@ -1,6 +1,5 @@
-install_tools(){
-    if ! command -v jq &> /dev/null
-    then
+install_tools() {
+    if ! command -v jq &>/dev/null; then
         sudo apt-get update
         sudo apt-get install -y jq
     else
@@ -8,18 +7,16 @@ install_tools(){
     fi
 }
 
-install_az_cli(){
-    if ! command -v az &> /dev/null
-    then
+install_az_cli() {
+    if ! command -v az &>/dev/null; then
         curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
     else
         echo "[${FUNCNAME[0]}] Azure CLI already installed"
     fi
 }
 
-install_powershell(){
-    if ! command -v pwsh &> /dev/null
-    then
+install_powershell() {
+    if ! command -v pwsh &>/dev/null; then
         # Update the list of packages
         sudo apt-get update
         # Install pre-requisite packages.
@@ -39,7 +36,7 @@ install_powershell(){
     fi
 }
 
-install_azureadmodule(){
+install_azureadmodule() {
     echo "[${FUNCNAME[0]}] Installing Microsoft.Graph module"
     pwsh -Command "If(-not(Get-InstalledModule Microsoft.Graph -ErrorAction silentlycontinue)){Install-Module Microsoft.Graph -Confirm:\$False -Force}"
 }

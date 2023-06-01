@@ -17,6 +17,11 @@
 # these permissions, it will interactively ask you to login with a user with
 # the needed permissions.
 #
+# Note: the script tries to have idempotency, but it is not guaranteed. It
+# checks for existing resources, will not create them again, but retrieves their
+# values for using them in later steps. So, it should be safe to delete manually
+# any failed resource and run the script again to fix and continue.
+#
 # Copyright (c) 2023 Juan Manuel Servera
 #
 # This program is free software: you can redistribute it and/or modify
