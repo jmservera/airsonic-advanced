@@ -1,19 +1,46 @@
 #!/bin/bash
+# This is a demo install script to configure and deploy the airsonic application
+# in a kubernetes cluster on Azure connected to a MySQL server using
+# passwordless authentication.
+#
+# To achieve the passwordless authentication between AKS and the MySQL Server,
+# the script will create two user managed identities. One is needed for the
+# MySQL server to be able to create the Azure AD users into the database; the
+# other one will be used by the workload deployed in AKS to access the MySQL.
+#
+# The script needs to be run from the install/k8s directory and will also call
+# a powershell script to assign the needed permissions to the MySQL managed
+# identity. You will need to run this script with an Azure user that has
+# permissions to create user managed identities and assign permissions to them,
+# but it also needs to run the powershell script with an Active Directory user
+# that has Global Administrator permissions. If your Azure user does not have
+# these permissions, it will interactively ask you to login with a user with
+# the needed permissions.
+#
+# Copyright (c) 2023 Juan Manuel Servera
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 
-# exit functions
-sigterm_handler() { 
-  exit 1
+###############################################
+# global section for helper functions
+###############################################
+
+sigterm_handler() {
+    exit 1
 }
 error() {
-  local parent_lineno="$1"
-  local message="$2"
-  local code="${3:-1}"
-  if [[ -n "$message" ]] ; then
-    echo "Error on or near line ${parent_lineno}: ${message}; exiting with status ${code}"
-  else
-    echo "Error on or near line ${parent_lineno}; exiting with status ${code}"
-  fi
-  exit "${code}"
+    local parent_lineno="$1"
+    local message="$2"
+    local code="${3:-1}"
+    if [[ -n "$message" ]]; then
+        echo "Error on or near line ${parent_lineno}: ${message}; exiting with status ${code}"
+    else
+        echo "Error on or near line ${parent_lineno}; exiting with status ${code}"
+    fi
+    exit "${code}"
 }
 
 # Setup signal trap for keyboard interrupt
@@ -26,41 +53,58 @@ command 2> >(while read line; do echo -e "\e[01;31m$line\e[0m" >&2; done)
 
 # parse arguments
 NOBUILD=0
-while getopts j flag
-do
+while getopts j flag; do
     case "${flag}" in
-        j) NOBUILD=1;;
+    j) NOBUILD=1 ;;
     esac
 done
 
-##################################
-# Script starts here
-##################################
+###############################################
+# Deployment script starts here
+###############################################
 
 # load .env file, check .env-demo for an example
 set -o allexport
 source .env
 set +o allexport
 
-# adds the rdbms extension to az cli to run mysql commands
-prepare_azcli () {
+###############################################
+# Adds the rdbms extension to az cli to run
+# mysql commands
+#
+# Outputs:
+#   Writes to stdout
+###############################################
+prepare_azcli() {
     echo "[${FUNCNAME[0]}] Preparing az cli"
     # install az cli extension rdbms-connect
     extension=$(az extension list --query "[?name=='rdbms-connect'] | [0]")
-    if [ -z "$extension" ]
-    then
+    if [ -z "$extension" ]; then
         az extension add --name rdbms-connect
     else
         echo "[${FUNCNAME[0]}] rdbms-connect extension already installed"
     fi
 }
-
-# login to azure and acr, does subscription selection too.
-# tries to use the current az cli session if possible
-login(){
-    export CURRENT_USERNAME=$(az account show --query user.name -o tsv)    
-    if [ -z "$CURRENT_USERNAME" ]
-    then
+###############################################
+# Login to azure and acr.
+# When there are multiple subscriptions and the
+# SUBSCRIPTION_ID is not set, it will ask to
+# select a subscription.
+#
+# It tries to use the current az cli session if possible
+#
+# Globals:
+#   CURRENT_USERNAME
+#   SUBSCRIPTION_ID
+#   ACCOUNT_NAME
+#   ACR_NAME
+# Outputs:
+#   ACCOUNT_NAME: the name of the selected subscription
+#   Writes to stdout
+###############################################
+login() {
+    export CURRENT_USERNAME=$(az account show --query user.name -o tsv)
+    if [ -z "$CURRENT_USERNAME" ]; then
         echo "[${FUNCNAME[0]}] Login to Azure"
         az login
     else
@@ -69,8 +113,7 @@ login(){
 
     CURRENT_USER_OBJECTID=$(az ad signed-in-user show --query id -o tsv)
 
-    if [ ! -z "$SUBSCRIPTION_ID" ]
-    then
+    if [ ! -z "$SUBSCRIPTION_ID" ]; then
         echo "[${FUNCNAME[0]}] Setting subscription to $SUBSCRIPTION_ID"
         az account set --subscription "$SUBSCRIPTION_ID"
     else
@@ -79,8 +122,7 @@ login(){
         ACCOUNTS=$(az account list --query "[].name" -o tsv)
         readarray -t ACCOUNT_LIST < <(echo "$ACCOUNTS")
         PS3="Select subscription: "
-        if [ ${#ACCOUNT_LIST[@]} -gt 1 ]
-        then
+        if [ ${#ACCOUNT_LIST[@]} -gt 1 ]; then
             echo "[${FUNCNAME[0]}] Select subscription"
             select ACCOUNT_NAME in "${ACCOUNT_LIST[@]}"; do
                 if [[ -n $ACCOUNT_NAME ]]; then
@@ -100,46 +142,63 @@ login(){
     az acr login -n ${ACR_NAME}
 }
 
-# create the mysql server identities, we need two user managed identities
+###############################################
+# Creates the mysql server identities, we need two user managed identities
 # one for the mysql server and one for the workload.
 # the workload identity will be used to access the mysql server from AKS
 # the mysql server identity is needed to be able to assign the workload identity
-create_identities(){
+#
+# Globals:
+#   RESOURCE_GROUP
+#   MYSQL_MANAGED_IDENTITY_NAME
+#   WORKLOAD_IDENTITY_NAME
+# Outputs:
+#   UMI: the principalId of the mysql managed identity
+#   Writes to stdout
+###############################################
+create_identities() {
     echo "[${FUNCNAME[0]}] Create mysql managed identity for the service"
     export UMI=$(az identity show \
-                    -g $RESOURCE_GROUP \
-                    -n "$MYSQL_MANAGED_IDENTITY_NAME" \
-                    --query "principalId" \
-                    -o tsv  2>/dev/null)
-    if [ -z "$UMI" ]
-    then
+        -g $RESOURCE_GROUP \
+        -n "$MYSQL_MANAGED_IDENTITY_NAME" \
+        --query "principalId" \
+        -o tsv 2>/dev/null)
+    if [ -z "$UMI" ]; then
         export UMI=$(az identity create \
-                        -g $RESOURCE_GROUP \
-                        -n "$MYSQL_MANAGED_IDENTITY_NAME" \
-                        --query "principalId" \
-                        -o tsv)
+            -g $RESOURCE_GROUP \
+            -n "$MYSQL_MANAGED_IDENTITY_NAME" \
+            --query "principalId" \
+            -o tsv)
     else
         echo "[${FUNCNAME[0]}] Managed identity already exists"
     fi
 
-
     echo "[${FUNCNAME[0]}] Creating workload identity"
     WI=$(az identity show \
-            -g $RESOURCE_GROUP \
-            -n "$WORKLOAD_IDENTITY_NAME" \
-            --query "principalId" \
-            -o tsv  2>/dev/null)
-    if [ -z "$WI" ]
-    then
+        -g $RESOURCE_GROUP \
+        -n "$WORKLOAD_IDENTITY_NAME" \
+        --query "principalId" \
+        -o tsv 2>/dev/null)
+    if [ -z "$WI" ]; then
         az identity create -g $RESOURCE_GROUP -n "$WORKLOAD_IDENTITY_NAME"
     else
         echo "[${FUNCNAME[0]}] Workload identity already exists"
     fi
 }
 
-# build the airsonic container
-prepare_container(){
-    if((NOBUILD)); then
+###############################################
+# Builds the code with Maven and the airsonic container
+#
+# Globals:
+#   NOBUILD: if set to 1, the build will be skipped
+#   AIRSONIC_VERSION
+#   AIRSONIC_CONTAINER
+#   ACR_NAME_FULL
+# Outputs:
+#   Writes to stdout
+###############################################
+prepare_container() {
+    if ((NOBUILD)); then
         echo "[${FUNCNAME[0]}] Skipping build"
         return
     fi
@@ -147,25 +206,36 @@ prepare_container(){
     pushd ../../
     # use docker to run maven to build the .war file and the container
     docker run -it --rm --workdir /src -v $(pwd):/src:rw \
-      -v /tmp/mvnprofile:/root:rw -v /var/run/docker.sock:/var/run/docker.sock \
-      maven:3.9.1-eclipse-temurin-17   mvn package -DskipTests -P docker
+        -v /tmp/mvnprofile:/root:rw -v /var/run/docker.sock:/var/run/docker.sock \
+        maven:3.9.1-eclipse-temurin-17 mvn package -DskipTests -P docker
     popd
 
     echo "[${FUNCNAME[0]}] Tag and push container"
     docker tag airsonicadvanced/airsonic-advanced:latest \
-     ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:${AIRSONIC_VERSION}
+        ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:${AIRSONIC_VERSION}
     docker tag airsonicadvanced/airsonic-advanced:latest \
-     ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:latest
+        ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:latest
     docker push ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:${AIRSONIC_VERSION}
 }
 
-
-prepare_aks(){
+###############################################
+# prepares the AKS cluster by connecting to the
+# ACR, enabling workload identities and getting
+# the local credentials.
+#
+# Globals:
+#   RESOURCE_GROUP
+#   ACR_NAME
+#   AKS_CLUSTER
+#
+# Outputs:
+#   Writes to stdout
+###############################################
+prepare_aks() {
     echo "[${FUNCNAME[0]}] Connecting to ACR"
     ACR_CONNECTED=$(az aks check-acr -n ${AKS_CLUSTER} -g ${RESOURCE_GROUP} \
         --acr ${ACR_NAME}.azurecr.io 2>/dev/null | grep error)
-    if [ -z "$ACR_CONNECTED" ]
-    then
+    if [ -z "$ACR_CONNECTED" ]; then
         echo "[${FUNCNAME[0]}] Already connected to ACR"
     else
         echo "[${FUNCNAME[0]}] Connect to ACR"
@@ -176,10 +246,9 @@ prepare_aks(){
     echo "[${FUNCNAME[0]}] Add support for workload identity"
     WI_ENABLED=$(az aks show -n ${AKS_CLUSTER} -g ${RESOURCE_GROUP} \
         --query "securityProfile.workloadIdentity.enabled" -o tsv)
-    OIDC_ENABLED=$( az aks show -n ${AKS_CLUSTER} -g ${RESOURCE_GROUP} \
+    OIDC_ENABLED=$(az aks show -n ${AKS_CLUSTER} -g ${RESOURCE_GROUP} \
         --query "oidcIssuerProfile.enabled" -o tsv)
-    if [ "$WI_ENABLED" = "true" ] && [ "$OIDC_ENABLED" = "true" ]
-    then
+    if [ "$WI_ENABLED" = "true" ] && [ "$OIDC_ENABLED" = "true" ]; then
         echo "[${FUNCNAME[0]}] Workload identity already enabled"
     else
         az aks update \
@@ -196,17 +265,34 @@ prepare_aks(){
         --overwrite-existing
 }
 
-prepare_workload_identity(){
+###############################################
+# Prepares the workload identity by creating
+# a federated identity linked to the workload
+# identity in the AKS cluster.
+#
+# Globals:
+#   RESOURCE_GROUP
+#   AKS_CLUSTER
+#   WORKLOAD_IDENTITY_NAME
+#   FEDERATED_IDENTITY_CREDENTIAL_NAME
+#   KUBERNETES_NAMESPACE
+#   SERVICE_ACCOUNT_NAME
+#
+# Outputs:
+#   WORKLOAD_IDENTITY_ID: the clientId of the workload identity
+#   Writes to stdout
+###############################################
+prepare_workload_identity() {
     echo "[${FUNCNAME[0]}] Create federated identity linked to workload identity"
     AKS_OIDC_ISSUER="$(az aks show -n ${AKS_CLUSTER} \
-                                   -g "${RESOURCE_GROUP}" \
-                                   --query "oidcIssuerProfile.issuerUrl" \
-                                   -o tsv)"
+        -g "${RESOURCE_GROUP}" \
+        --query "oidcIssuerProfile.issuerUrl" \
+        -o tsv)"
     export WORKLOAD_IDENTITY_ID=$(az identity show \
-                                    -g ${RESOURCE_GROUP} \
-                                    -n ${WORKLOAD_IDENTITY_NAME} \
-                                    --query "clientId" \
-                                    -o tsv)
+        -g ${RESOURCE_GROUP} \
+        -n ${WORKLOAD_IDENTITY_NAME} \
+        --query "clientId" \
+        -o tsv)
     # this step is crucial, check you have the right namespace selected for the federated service account configuration
     az identity federated-credential create \
         --name ${FEDERATED_IDENTITY_CREDENTIAL_NAME} \
@@ -216,30 +302,55 @@ prepare_workload_identity(){
         --subject system:serviceaccount:${KUBERNETES_NAMESPACE}:${SERVICE_ACCOUNT_NAME}
 }
 
-add_permissions_to_managed_identity(){
+###############################################
+# Prepares the MySQL managed identity by adding
+# the necessary permissions with the permissions.ps1
+# script.
+#
+# Globals:
+#   TENANT_ID
+#   UMI
+#
+# Outputs:
+#   Writes to stdout
+###############################################
+add_permissions_to_managed_identity() {
     echo "[${FUNCNAME[0]}] Add permissions to managed identity"
     TENANT_ID=$(az account show --query tenantId -o tsv)
     TOKEN=$(az account get-access-token \
-                --resource-type ms-graph \
-                --query accessToken \
-                --scope https://graph.microsoft.com/.default \
-                -o tsv)
+        --resource-type ms-graph \
+        --query accessToken \
+        --scope https://graph.microsoft.com/.default \
+        -o tsv)
     pwsh -c "./permissions.ps1 -TenantId '${TENANT_ID}' -UmiId '${UMI}' -Token '${TOKEN}'"
 }
 
-prepare_sql () {
+###############################################
+# Prepares the MySQL server by adding the
+# managed identity and the admin user.
+#
+# Globals:
+#   RESOURCE_GROUP
+#   MYSQL_SERVER_NAME
+#   MYSQL_MANAGED_IDENTITY_NAME
+#   CURRENT_USERNAME
+#   CURRENT_USER_OBJECTID
+#
+# Outputs:
+#   Writes to stdout
+###############################################
+prepare_sql() {
     echo "[${FUNCNAME[0]}] Add mysql server identities"
 
     id=$(az mysql flexible-server identity show \
-            --resource-group $RESOURCE_GROUP \
-            --server-name $MYSQL_SERVER_NAME \
-            --identity $MYSQL_MANAGED_IDENTITY_NAME \
-            --query principalId \
-            -o tsv 2>/dev/null)
+        --resource-group $RESOURCE_GROUP \
+        --server-name $MYSQL_SERVER_NAME \
+        --identity $MYSQL_MANAGED_IDENTITY_NAME \
+        --query principalId \
+        -o tsv 2>/dev/null)
 
     echo "[${FUNCNAME[0]}] Managed Identity assignment"
-    if [ -z "$id" ]
-    then
+    if [ -z "$id" ]; then
         az mysql flexible-server identity assign \
             --resource-group $RESOURCE_GROUP \
             --server-name $MYSQL_SERVER_NAME \
@@ -249,14 +360,13 @@ prepare_sql () {
     fi
 
     echo "[${FUNCNAME[0]}] Admin user assignment"
-    login=$(az mysql flexible-server ad-admin show \
-                --resource-group $RESOURCE_GROUP \
-                --server-name $MYSQL_SERVER_NAME \
-                --query login \
-                -o tsv 2>/dev/null)
+    logonname=$(az mysql flexible-server ad-admin show \
+        --resource-group $RESOURCE_GROUP \
+        --server-name $MYSQL_SERVER_NAME \
+        --query login \
+        -o tsv 2>/dev/null)
 
-    if [ "$CURRENT_USERNAME" != "$login" ]
-    then
+    if [ "$CURRENT_USERNAME" != "$logonname" ]; then
         az mysql flexible-server ad-admin create \
             --resource-group $RESOURCE_GROUP \
             --server-name $MYSQL_SERVER_NAME \
@@ -264,19 +374,18 @@ prepare_sql () {
             --object-id $CURRENT_USER_OBJECTID \
             --identity $MYSQL_MANAGED_IDENTITY_NAME
     else
-        echo "[${FUNCNAME[0]}] Admin user already assigned"
+        echo "[${FUNCNAME[0]}] Admin user already assigned to $CURRENT_USERNAME"
     fi
 
     MY_IP=$(curl -s ifconfig.me)
     echo "[${FUNCNAME[0]}] Add firewall rules for mysql server for $MY_IP"
     IP=$(az mysql flexible-server firewall-rule show \
-                --resource-group $RESOURCE_GROUP \
-                --rule-name "${MYSQL_SERVER_NAME}-database-allow-local-ip-wsl" \
-                --name "$MYSQL_SERVER_NAME" \
-                --query startIpAddress \
-                -o tsv  2>/dev/null)
-    if [ "$IP" != "$MY_IP" ]
-    then   
+        --resource-group $RESOURCE_GROUP \
+        --rule-name "${MYSQL_SERVER_NAME}-database-allow-local-ip-wsl" \
+        --name "$MYSQL_SERVER_NAME" \
+        --query startIpAddress \
+        -o tsv 2>/dev/null)
+    if [ "$IP" != "$MY_IP" ]; then
         az mysql flexible-server firewall-rule create \
             --resource-group $RESOURCE_GROUP \
             --rule-name "${MYSQL_SERVER_NAME}-database-allow-local-ip-wsl" \
@@ -289,13 +398,12 @@ prepare_sql () {
 
     echo "[${FUNCNAME[0]}] Add firewall rules for mysql server for azure services"
     IP=$(az mysql flexible-server firewall-rule show \
-                --resource-group $RESOURCE_GROUP \
-                --rule-name "${MYSQL_SERVER_NAME}-database-allow-azure" \
-                --name "$MYSQL_SERVER_NAME" \
-                --query startIpAddress \
-                -o tsv  2>/dev/null)
-    if [ "$IP" != "0.0.0.0" ]
-    then
+        --resource-group $RESOURCE_GROUP \
+        --rule-name "${MYSQL_SERVER_NAME}-database-allow-azure" \
+        --name "$MYSQL_SERVER_NAME" \
+        --query startIpAddress \
+        -o tsv 2>/dev/null)
+    if [ "$IP" != "0.0.0.0" ]; then
         az mysql flexible-server firewall-rule create \
             --resource-group $RESOURCE_GROUP \
             --rule-name "${MYSQL_SERVER_NAME}-database-allow-azure" \
@@ -305,17 +413,16 @@ prepare_sql () {
         echo "[${FUNCNAME[0]}] Firewall rule for azure services already present"
     fi
 
-
     echo "[${FUNCNAME[0]}] Add needed permissions to the managed identity for mysql"
     add_permissions_to_managed_identity
     echo "[${FUNCNAME[0]}] Create user in mysql"
     # using a temporary file because the --querytext parameter in the az cli gives a syntax error
-    (envsubst < create_ad_user.sql) > /tmp/create_ad_user.sql
+    (envsubst <create_ad_user.sql) >/tmp/create_ad_user.sql
 
     TOKEN=$(az account get-access-token \
-                --resource-type oss-rdbms \
-                --output tsv \
-                --query accessToken)
+        --resource-type oss-rdbms \
+        --output tsv \
+        --query accessToken)
     az mysql flexible-server execute \
         --admin-user $CURRENT_USERNAME \
         --admin-password "$TOKEN" \
@@ -331,33 +438,45 @@ prepare_sql () {
     rm /tmp/create_ad_user.sql
 }
 
-deploy_to_aks(){
+###############################################
+# Deploys the airsonic application to AKS.
+#
+# Globals:
+#   MYSQL_SERVER_NAME_FULL
+#   MYSQL_DATABASE_NAME
+#   KUBERNETES_NAMESPACE
+#
+# Outputs:
+#   MYSQL_URL: the jdbc url to the mysql server
+#   Writes to stdout
+###############################################
+deploy_to_aks() {
     pushd templates
 
     echo "[${FUNCNAME[0]}] Create namespace"
-    envsubst < ns.yaml | kubectl apply -f -
+    envsubst <ns.yaml | kubectl apply -f -
 
     echo "[${FUNCNAME[0]}] Create secrets"
     export MYSQL_URL="jdbc:mysql://${MYSQL_SERVER_NAME_FULL}:3306/${MYSQL_DATABASE_NAME}?sslMode=REQUIRED&defaultAuthenticationPlugin=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin&authenticationPlugins=com.azure.identity.extensions.jdbc.mysql.AzureMysqlAuthenticationPlugin"
-    envsubst < secrets.yaml | kubectl apply -f -
+    envsubst <secrets.yaml | kubectl apply -f -
 
     echo "[${FUNCNAME[0]}] create service account"
-    envsubst < serviceaccount.yaml | kubectl apply -f -
+    envsubst <serviceaccount.yaml | kubectl apply -f -
 
     echo "[${FUNCNAME[0]}] Create pvc"
-    envsubst < azure-pvc.yaml | kubectl apply -f -
+    envsubst <azure-pvc.yaml | kubectl apply -f -
 
     echo "[${FUNCNAME[0]}] Create deployment"
-    envsubst < deployment.yaml | kubectl apply -f -
+    envsubst <deployment.yaml | kubectl apply -f -
 
     echo "[${FUNCNAME[0]}] Create service"
-    envsubst < service.yaml | kubectl apply -f -
+    envsubst <service.yaml | kubectl apply -f -
 
     echo "[${FUNCNAME[0]}] Wait for pods to be ready"
     kubectl get pods -n $KUBERNETES_NAMESPACE -w
 
     popd
-}    
+}
 
 # install some prerequisites, like jq, az cli and powershell
 ./0-prereq.sh
