@@ -106,17 +106,29 @@ login(){
 # the mysql server identity is needed to be able to assign the workload identity
 create_identities(){
     echo "[${FUNCNAME[0]}] Create mysql managed identity for the service"
-    export UMI=$(az identity show -g $RESOURCE_GROUP -n "$MYSQL_MANAGED_IDENTITY_NAME" --query "principalId" -o tsv)
+    export UMI=$(az identity show \
+                    -g $RESOURCE_GROUP \
+                    -n "$MYSQL_MANAGED_IDENTITY_NAME" \
+                    --query "principalId" \
+                    -o tsv  2>/dev/null)
     if [ -z "$UMI" ]
     then
-        export UMI=$(az identity create -g $RESOURCE_GROUP -n "$MYSQL_MANAGED_IDENTITY_NAME" --query "principalId" -o tsv)
+        export UMI=$(az identity create \
+                        -g $RESOURCE_GROUP \
+                        -n "$MYSQL_MANAGED_IDENTITY_NAME" \
+                        --query "principalId" \
+                        -o tsv)
     else
         echo "[${FUNCNAME[0]}] Managed identity already exists"
     fi
 
 
     echo "[${FUNCNAME[0]}] Creating workload identity"
-    WI=$(az identity show -g $RESOURCE_GROUP -n "$WORKLOAD_IDENTITY_NAME" --query "principalId" -o tsv)
+    WI=$(az identity show \
+            -g $RESOURCE_GROUP \
+            -n "$WORKLOAD_IDENTITY_NAME" \
+            --query "principalId" \
+            -o tsv  2>/dev/null)
     if [ -z "$WI" ]
     then
         az identity create -g $RESOURCE_GROUP -n "$WORKLOAD_IDENTITY_NAME"
@@ -223,7 +235,7 @@ prepare_sql () {
             --server-name $MYSQL_SERVER_NAME \
             --identity $MYSQL_MANAGED_IDENTITY_NAME \
             --query principalId \
-            -o tsv)
+            -o tsv 2>/dev/null)
 
     echo "[${FUNCNAME[0]}] Managed Identity assignment"
     if [ -z "$id" ]
@@ -241,7 +253,7 @@ prepare_sql () {
                 --resource-group $RESOURCE_GROUP \
                 --server-name $MYSQL_SERVER_NAME \
                 --query login \
-                -o tsv)
+                -o tsv 2>/dev/null)
 
     if [ "$CURRENT_USERNAME" != "$login" ]
     then
@@ -262,7 +274,7 @@ prepare_sql () {
                 --rule-name "${MYSQL_SERVER_NAME}-database-allow-local-ip-wsl" \
                 --name "$MYSQL_SERVER_NAME" \
                 --query startIpAddress \
-                -o tsv)
+                -o tsv  2>/dev/null)
     if [ "$IP" != "$MY_IP" ]
     then   
         az mysql flexible-server firewall-rule create \
@@ -281,7 +293,7 @@ prepare_sql () {
                 --rule-name "${MYSQL_SERVER_NAME}-database-allow-azure" \
                 --name "$MYSQL_SERVER_NAME" \
                 --query startIpAddress \
-                -o tsv)
+                -o tsv  2>/dev/null)
     if [ "$IP" != "0.0.0.0" ]
     then
         az mysql flexible-server firewall-rule create \
