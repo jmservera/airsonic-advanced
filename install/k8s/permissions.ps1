@@ -26,11 +26,14 @@ else{
 }
 
 $isGlobalAdmin = $false
-
+Connect-MgGraph -AccessToken $Token
 while(!$isGlobalAdmin){
     $usrId=(get-mguser -Filter "UserPrincipalName eq '$($(get-mgcontext).Account)'").Id
-    $isGlobalAdmin = $( (Get-MgDirectoryRoleMember -DirectoryRoleId (Get-MgDirectoryRole -Filter "DisplayName eq 'Global Administrator'").Id -Filter "Id eq '$usrId'").Id -eq $usrId )
-
+    if($usrId -ne $null){
+        $isGlobalAdmin = $( (Get-MgDirectoryRoleMember -DirectoryRoleId (Get-MgDirectoryRole -Filter "DisplayName eq 'Global Administrator'").Id -Filter "Id eq '$usrId'").Id -eq $usrId )
+    }
+    
+    Write-Host "isGlobalAdmin: $isGlobalAdmin"
     if(!$isGlobalAdmin){
         Write-Host "You need to be a Global Administrator to run this script, please login again with a Global Administrator account"
         Connect-MgGraph -TenantId $TenantId -Scopes $scopes
