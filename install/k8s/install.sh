@@ -57,13 +57,13 @@ trap 'error ${LINENO}' ERR
 command 2> >(while read line; do echo -e "\e[01;31m$line\e[0m" >&2; done)
 
 # parse arguments
-NOBUILD=0
-DEPLOYRESOURCES=0
+BUILD=1
+DEPLOYRESOURCES=1
 
 while getopts jd flag; do
     case "${flag}" in
-    d) DEPLOYRESOURCES=1 ;;
-    j) NOBUILD=1 ;;
+    d) DEPLOYRESOURCES=0 ;;
+    j) BUILD=0 ;;
     esac
 done
 
@@ -225,7 +225,7 @@ create_identities() {
 # Builds the code with Maven and the airsonic container
 #
 # Globals:
-#   NOBUILD: if set to 1, the build will be skipped
+#   BUILD: if set to 0, the build will be skipped
 #   AIRSONIC_VERSION
 #   AIRSONIC_CONTAINER
 #   ACR_NAME_FULL
@@ -233,28 +233,27 @@ create_identities() {
 #   Writes to stdout
 ###############################################
 prepare_container() {
-    if ((NOBUILD)); then
+    if [ 1 -eq $BUILD ]; then
+        echo "[${FUNCNAME[0]}] Login to ACR"
+        az acr login -n ${ACR_NAME}
+
+        echo "[${FUNCNAME[0]}] Build .war file and container"
+        pushd ../../
+        # use docker to run maven to build the .war file and the container
+        docker run -it --rm --workdir /src -v $(pwd):/src:rw \
+            -v /tmp/mvnprofile:/root:rw -v /var/run/docker.sock:/var/run/docker.sock \
+            maven:3.9.1-eclipse-temurin-17 mvn package -DskipTests -P docker
+        popd
+
+        echo "[${FUNCNAME[0]}] Tag and push container"
+        docker tag airsonicadvanced/airsonic-advanced:latest \
+            ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:${AIRSONIC_VERSION}
+        docker tag airsonicadvanced/airsonic-advanced:latest \
+            ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:latest
+        docker push ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:${AIRSONIC_VERSION}
+    else
         echo "[${FUNCNAME[0]}] Skipping build"
-        return
     fi
-
-    echo "[${FUNCNAME[0]}] Login to ACR"
-    az acr login -n ${ACR_NAME}
-
-    echo "[${FUNCNAME[0]}] Build .war file and container"
-    pushd ../../
-    # use docker to run maven to build the .war file and the container
-    docker run -it --rm --workdir /src -v $(pwd):/src:rw \
-        -v /tmp/mvnprofile:/root:rw -v /var/run/docker.sock:/var/run/docker.sock \
-        maven:3.9.1-eclipse-temurin-17 mvn package -DskipTests -P docker
-    popd
-
-    echo "[${FUNCNAME[0]}] Tag and push container"
-    docker tag airsonicadvanced/airsonic-advanced:latest \
-        ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:${AIRSONIC_VERSION}
-    docker tag airsonicadvanced/airsonic-advanced:latest \
-        ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:latest
-    docker push ${ACR_NAME_FULL}/${AIRSONIC_CONTAINER}:${AIRSONIC_VERSION}
 }
 
 ###############################################
@@ -527,7 +526,7 @@ prepare_azcli
 # login to azure and acr, does subscription selection too
 login
 # deploy aks + acr + mysql
-if ((DEPLOYRESOURCES)); then
+if [ 1 -eq $DEPLOYRESOURCES ]; then
     deployresources
 fi
 # creates the two identities needed for mysql
