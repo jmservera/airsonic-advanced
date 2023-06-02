@@ -58,8 +58,11 @@ command 2> >(while read line; do echo -e "\e[01;31m$line\e[0m" >&2; done)
 
 # parse arguments
 NOBUILD=0
-while getopts j flag; do
+DEPLOYRESOURCES=0
+
+while getopts jd flag; do
     case "${flag}" in
+    d) DEPLOYRESOURCES=1 ;;
     j) NOBUILD=1 ;;
     esac
 done
@@ -67,7 +70,6 @@ done
 ###############################################
 # Deployment script starts here
 ###############################################
-
 # load .env file, check .env-demo for an example
 set -o allexport
 source .env
@@ -91,7 +93,7 @@ prepare_azcli() {
     fi
 }
 ###############################################
-# Login to azure and acr.
+# Login to azure.
 # When there are multiple subscriptions and the
 # SUBSCRIPTION_ID is not set, it will ask to
 # select a subscription.
@@ -102,7 +104,6 @@ prepare_azcli() {
 #   CURRENT_USERNAME
 #   SUBSCRIPTION_ID
 #   ACCOUNT_NAME
-#   ACR_NAME
 # Outputs:
 #   ACCOUNT_NAME: the name of the selected subscription
 #   Writes to stdout
@@ -142,9 +143,32 @@ login() {
 
     export ACCOUNT_NAME=$(az account show --query name -o tsv)
     echo "[${FUNCNAME[0]}] Logged in as $CURRENT_USERNAME in subscription $ACCOUNT_NAME"
+}
 
-    echo "[${FUNCNAME[0]}] Login to ACR"
-    az acr login -n ${ACR_NAME}
+###############################################
+# Deploys the basic resources: ACR, AKS, MySQL
+# server and database.
+# It will only deploy the three resources
+# without any link between them nor any other
+# configuration.
+###############################################
+deployresources() {
+    pushd bicep
+    GRP=$(az group exists -n ${RESOURCE_GROUP})
+    if [ "$GRP" = "false" ]; then
+        echo "[${FUNCNAME[0]}] Creating resource group ${RESOURCE_GROUP}"
+        az group create -n ${RESOURCE_GROUP} -l ${LOCATION}
+    fi
+    echo "[${FUNCNAME[0]}] Deploying resources"
+    az deployment group create \
+        -f main.bicep \
+        -g ${RESOURCE_GROUP} \
+        --parameters acrName="$ACR_NAME" \
+                     clusterName="$AKS_CLUSTER" \
+                     serverName="$MYSQL_SERVER_NAME" \
+                     dbName="$MYSQL_DATABASE_NAME" \
+                     administratorLoginPassword="SuperS3cretPass!"
+    popd
 }
 
 ###############################################
@@ -207,6 +231,10 @@ prepare_container() {
         echo "[${FUNCNAME[0]}] Skipping build"
         return
     fi
+
+    echo "[${FUNCNAME[0]}] Login to ACR"
+    az acr login -n ${ACR_NAME}
+
     echo "[${FUNCNAME[0]}] Build .war file and container"
     pushd ../../
     # use docker to run maven to build the .war file and the container
@@ -489,6 +517,10 @@ deploy_to_aks() {
 prepare_azcli
 # login to azure and acr, does subscription selection too
 login
+# deploy aks + acr + mysql
+if ((DEPLOYRESOURCES)); then
+    deployresources
+fi
 # creates the two identities needed for mysql
 create_identities
 # # builds the java with maven and creates the container
