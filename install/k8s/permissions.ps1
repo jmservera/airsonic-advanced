@@ -31,12 +31,20 @@ $isGlobalAdmin = $false
 while (!$isGlobalAdmin) {
     $usrId = (get-mguser -Filter "UserPrincipalName eq '$($(get-mgcontext).Account)'").Id
     if ($null -ne $usrId) {
-        $isGlobalAdmin = $( (Get-MgDirectoryRoleMember -DirectoryRoleId (Get-MgDirectoryRole -Filter "DisplayName eq 'Global Administrator'").Id -Filter "Id eq '$usrId'").Id -eq $usrId )
+        $filter = 'Global Administrator','Privileged Role Administrator'
+        $roleIds = Get-MgDirectoryRole | where-object -Property DisplayName -in $filter
+        foreach ($roleId in $roleIds) {
+            $members = Get-MgDirectoryRoleMember -DirectoryRoleId $roleId.Id
+            $isGlobalAdmin = ($members | where-object -Property Id -eq $usrId).Count -gt 0
+            if ($isGlobalAdmin) {
+                break
+            }
+        }
     }
     
     Write-Host "isGlobalAdmin: $isGlobalAdmin"
     if (!$isGlobalAdmin) {
-        Write-Host "You need to be a Global Administrator to run this script, please login again with a Global Administrator account"
+        Write-Host "You need to be a Global Administrator or a Privileged Role Administrator to run this script, please login again with a Global Administrator account"
         Disconnect-MgGraph
         Connect-MgGraph -TenantId $TenantId -Scopes $scopes
     }    

@@ -1,45 +1,73 @@
-# Passwordless MySQL in AKS with Workload Identities --DRAFT--
+# Connect Passwordless to MySQL from AKS with Workload Identities --DRAFT--
 
-In this guide we will go through the steps to set up a MySQL database in Azure Database for MySQL Flexible Server, and connect to it from an application running in an Azure Kubernetes Service (AKS) cluster, using the passwordless approach. This approach uses Azure Active Directory (AAD) authentication to connect to the database.
+In this guide we will go through the steps to connect an application running in an AKS cluster to a MySQL database without having to store any credentials in the application or in the cluster. We will use the passwordless approach, which uses Azure Active Directory (AAD) authentication to connect to the database.
 
-With Azure Database for MySQL you can use a Managed Identity to connect your Spring or Java application to your database using a [passwordless connection][passwordless_mysql]. You can achieve this with minimal configuration changes and usually without any code change, just a few lines in your `pom.xml` file and a couple of lines in your `application.properties` file or in your `application.yml` file.
+<!--- more --->
 
-If you run your app in a Kubernetes cluster, you can use [Workload Identities][workload-identity] to connect to your database without having to store any credentials in your code or in your cluster.
+With Azure Database for MySQL you can use a Managed Identity to connect your Spring or Java application to your database using a [passwordless connection][passwordless_mysql]. You can achieve this with minimal configuration changes and usually without any code change, just a few lines in your `pom.xml` file to add a reference and a couple of lines in your `application.properties` file or in your `application.yml` file to setup the connection.
+
+On the other hand, when you run your app in an Azure Kubernetes Service cluster, you can use the [Workload Identities][workload-identity] to connect to other resources from a workload, without having to store any credentials in your code or in your cluster. This feature uses a Managed Identity, but instead of attaching this MI to a cluster or to the VM, now it is associated to a [Kubernetes Service Account][service-account], using a native k8s feature to provide the credentials to the application using [identity federation][oidc].
 
 Let's use this two features to connect our application to our database without having to store any credentials in our code or in our cluster.
 
 ![Airsonic app with no password in the JDBC config][airsonic_no_pwd]
 
-## What will you need?
+## What will we need to do?
 
-There are two parts in this exercise. First you need to setup the database to allow the connection with the Managed Identity, and then you need to setup the Kubernetes cluster to allow the connection from the application to the database.
+There are two parts in this exercise: setup the database to allow the connection with the Managed Identity, and configure the Kubernetes cluster to allow the connection from the application to the database.
 
-For the database part, you will need to have a Managed Identity that will be used to configure the AAD authentication in the database. This MI is not the same as the one that will be used in the application, and it needs a special permission to be able to configure the database. The steps to provide these permissions are documented in this article: [Azure AD authentication for MySQL Flexible Server from end to end][aadauth-mysql], but don't worry, we will go through them in this article too.
+For the database part, you will need to have a Managed Identity that will be used to configure the AAD authentication in the database. This MI is not the same as the one that will be used in the application, and it needs a special permission to be able to configure the database. The steps to provide these permissions are documented in this article: [Azure AD authentication for MySQL Flexible Server from end to end][aadauth-mysql], but don't worry, we will go through them in this article too, and using the new 
 
-For the Kubernetes part, you will need to have a Kubernetes cluster with the Workload Identity enabled. This is a feature that is still in preview, and you will need to enable it in your cluster. The steps to enable it are documented in this article: [Use managed identities in Azure Kubernetes Service][aks-wi].
+Then you will need to have an AKS cluster with the Workload Identity enabled. This is a feature that is still in preview, and you will need to enable it in your cluster. The steps to enable it are documented in this article: [Use managed identities in Azure Kubernetes Service][aks-wi].
 
 So here's the bill of materials of what we will use in this example:
-* General
+* Basics:
     * An Azure subscription.
-    * The Azure CLI.
+    * A user with Global Administrator permissions in the Azure AD tenant.
     * Docker installed in your machine.
-    * A Container Registry (ACR).
-    * Java 17 and Maven installed in a machine to build the application (or you can run everything with docker, no need to install anything else).
-* MySQL database:
-    * A MySQL Flexible Server.
-    * A Managed Identity, needed for setting up AAD authentication, with the following Graph permissions: User.Read.All, GroupMember.Read.All, Application.Read.All. Assigning these permissions is a bit tough because there's no way to add them from the UI and you need some arcane PowerShell commands to do it properly. The good news is that we have a script that will do it for you.
-    * A user with Global Administrator permissions in the Azure AD tenant. You need it to set the permissions for the Managed Identity.
-    * A MySQL client, like MySQL Workbench or the `mysql` cli, to connect to the database and run some queries.
-* Kubernetes cluster:
-    * An AKS cluster, we can create it or use an existing one that we will upgrade to enable Workload Identities.
-    * Another Managed Identity, this one will be used by the application to connect to the database.
-    * The `kubectl` CLI to connect to the cluster and deploy the application.
+    * A Linux distribution with Bash, Kubectl and Powershell installed, you can use the Windows Subsystem for Linux (WSL) if you are using Windows.
 
-## Building the application
+## Transforming a Spring Boot Application to use passwordless MySQL
+
+In this example we will use a Spring Boot application that uses a MySQL database. The application is a fork of the [Airsonic Advanced][airsonic] project, a music streaming server. I chose this project because it's a Java application that uses a MySQL database, and it's a bit more complex than a simple "Hello World" application.
+
+In the `install/k8s` folder you will find all the scripts and templates to
+build and deploy the application to an AKS cluster. I also included all the steps
+to install powershell in Linux, and the needed extensions for the `az` cli and 
+the PowerShell modules. You can clone the repository and checkout the branch `azure_passwordless` to get the code for this example:
 
 ```bash
 git clone "https://github.com/jmservera/airsonic-advanced.git" -b azure_passwordless
 ```
+
+Go to the `install/k8s` folder and copy the `.env-demo` file to `.env`:
+
+```bash
+cd install/k8s
+cp .env-demo .env
+```
+
+Now edit the `.env` file and set the values at least for these variables:
+
+```bash
+APP_NAME="airsonic"
+
+# basic resources
+SUBSCRIPTION_ID="" # The subscription ID, if you leave this blank,
+                   # you will be prompted to select a subscription
+ACR_NAME="Your Azure Container Registry"
+AKS_CLUSTER="your AKS cluster"
+RESOURCE_GROUP="airsonic-demo"
+LOCATION="westeurope" # Will only be used if you create a new resource group
+```
+
+> TL;DR: If you want to skip the explanation and go directly to the code, you
+can run the `install/k8s/install.sh` script. I tried to made it idempotent, so
+you can try different things and run it again if anything failed because of
+the credentials. You only need to run it from *bash* and it will take care of
+installing everything you need to run the scripts.
+
+### Building the application
 
 Start with the variables, you can create a .env file with this structure ([see the .env-demo file](./.env-demo)):
 
@@ -204,6 +232,24 @@ you pass to the `az identity federated-credential create` command.
 az identity federated-credential create --name ${FEDERATED_IDENTITY_CREDENTIAL_NAME} --identity-name ${WORKLOAD_IDENTITY_NAME} --resource-group ${RESOURCE_GROUP} --issuer ${AKS_OIDC_ISSUER} --subject system:serviceaccount:${KUBERNETES_NAMESPACE}:${SERVICE_ACCOUNT_NAME}
 ```
 
+## BOM summary
+
+* General
+    * An Azure subscription.
+    * The Azure CLI.
+    * Bash and PowerShell installed in a Linux machine, or the Windows Subsystem for Linux (WSL).
+    * Docker installed in your machine.
+    * A Container Registry (ACR).
+    * Java 17 and Maven installed in a machine to build the application (or you can run everything with docker, no need to install anything else).
+* MySQL database:
+    * A MySQL Flexible Server.
+    * A Managed Identity, needed for setting up AAD authentication, with the following Graph permissions: User.Read.All, GroupMember.Read.All, Application.Read.All. Assigning these permissions is a bit tough because there's no way to add them from the UI and you need some arcane PowerShell commands to do it properly. The good news is that we have a script that will do it for you.
+    * A user with Global Administrator permissions in the Azure AD tenant. You need it to set the permissions for the Managed Identity used to configure the AAD authentication in the database.
+    * A MySQL client, like MySQL Workbench or the `mysql` cli, to connect to the database and run some queries.
+* Kubernetes cluster:
+    * An AKS cluster, we can create it or use an existing one that we will upgrade to enable Workload Identities.
+    * Another Managed Identity, this one will be used by the application to connect to the database.
+    * The `kubectl` CLI to connect to the cluster and deploy the application.
 
 
 ## References
@@ -216,9 +262,11 @@ az identity federated-credential create --name ${FEDERATED_IDENTITY_CREDENTIAL_N
 [aadauth-mysql]: https://techcommunity.microsoft.com/t5/azure-database-for-mysql-blog/azure-ad-authentication-for-mysql-flexible-server-from-end-to/ba-p/3696353
 [airsonic]: https://github.com/jmservera/airsonic-advanced/tree/azure_passwordless
 [aks-wi]: https://learn.microsoft.com/azure/aks/workload-identity-overview
+[oidc]:https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#service-account-issuer-discovery
 [openjdk]: https://jdk.java.net/archive/
 [passwordless_mysql]: https://learn.microsoft.com/azure/developer/java/spring-framework/migrate-mysql-to-passwordless-connection
 [pomxml]: https://github.com/jmservera/airsonic-advanced/blob/azure_passwordless/airsonic-main/pom.xml
+[service-account]: https://kubernetes.io/docs/concepts/security/service-accounts/
 [temurin]: https://hub.docker.com/_/eclipse-temurin
 [workload-identity]: https://learn.microsoft.com/azure/aks/workload-identity-overview
 
