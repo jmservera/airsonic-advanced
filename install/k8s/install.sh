@@ -164,10 +164,10 @@ deployresources() {
         -f main.bicep \
         -g ${RESOURCE_GROUP} \
         --parameters acrName="$ACR_NAME" \
-                     clusterName="$AKS_CLUSTER" \
-                     serverName="$MYSQL_SERVER_NAME" \
-                     dbName="$MYSQL_DATABASE_NAME" \
-                     administratorLoginPassword="SuperS3cretPass!"
+        clusterName="$AKS_CLUSTER" \
+        serverName="$MYSQL_SERVER_NAME" \
+        dbName="$MYSQL_DATABASE_NAME" \
+        administratorLoginPassword="SuperS3cretPass!"
     popd
 }
 
@@ -186,6 +186,7 @@ deployresources() {
 #   Writes to stdout
 ###############################################
 create_identities() {
+    CREATED=0
     echo "[${FUNCNAME[0]}] Create mysql managed identity for the service"
     export UMI=$(az identity show \
         -g $RESOURCE_GROUP \
@@ -212,6 +213,11 @@ create_identities() {
         az identity create -g $RESOURCE_GROUP -n "$WORKLOAD_IDENTITY_NAME"
     else
         echo "[${FUNCNAME[0]}] Workload identity already exists"
+    fi
+
+    if ((CREATED)); then
+        echo "[${FUNCNAME[0]}] Waiting for identities to be propagated"
+        sleep 10
     fi
 }
 
@@ -333,6 +339,9 @@ prepare_workload_identity() {
         --resource-group ${RESOURCE_GROUP} \
         --issuer ${AKS_OIDC_ISSUER} \
         --subject system:serviceaccount:${KUBERNETES_NAMESPACE}:${SERVICE_ACCOUNT_NAME}
+
+    echo "[${FUNCNAME[0]}] Waiting for the federated identity to be propagated"
+    sleep 10
 }
 
 ###############################################

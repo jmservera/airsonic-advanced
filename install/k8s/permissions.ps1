@@ -45,6 +45,7 @@ while (!$isGlobalAdmin) {
 $graphsp = Get-MgServicePrincipal -Filter "appId eq '$graphappid'"
 
 $approles = $graphsp.AppRoles | Where-Object { $_.Value -in ($permissions) -and $_.AllowedMemberTypes -contains "Application" }
+$created = $false
 foreach ($approle in $approles) {
     $test = (Get-MgServicePrincipalAppRoleAssignment -serviceprincipalid $umiid | Where-Object { $_.AppRoleId -eq $approle.Id })
     if ($null -ne $test) {
@@ -52,4 +53,11 @@ foreach ($approle in $approles) {
         continue
     }
     New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $UmiId -PrincipalId $UmiId -ResourceId $graphsp.Id -AppRoleId $approle.Id
+    $created = $true
+}
+
+if ($true -eq $created) {
+    # Wait for the permissions to propagate
+    Write-Host "Waiting for permissions to propagate"
+    Start-Sleep -Seconds 60
 }
