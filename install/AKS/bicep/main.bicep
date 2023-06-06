@@ -1,7 +1,12 @@
-// call the three nested templates
-// nested/acr.bicep for ACR
-// nested/aks.bicep for AKS
-// nested/mysql.bicep for MySQL
+/*
+  This script creates three resources using these nested templates:
+    nested/acr.bicep creates an Azure Container Registry
+    nested/aks.bicep for the Azure Kubernetes Service
+    nested/mysql.bicep adds a MySQL Flexible Server
+  It is a very simple deployment that we use as a starting point to show how
+  to convert an AKS cluster with MySQL Flexible Server to use Azure AD
+  Workload Identity. 
+*/
 
 @description('The location of the Managed Cluster resource.')
 param location string = resourceGroup().location
@@ -24,7 +29,7 @@ param dbName string= 'db${uniqueString(resourceGroup().id)}'
 @secure()
 param administratorLoginPassword string
 
-module acr 'nested/acr.bicep' = {
+module acr './nested/acr.bicep' = {
   name: 'acr_deployment'
   params: {
     acrName: acrName
@@ -32,7 +37,7 @@ module acr 'nested/acr.bicep' = {
   }
 }
 
-module aks 'nested/aks.bicep' = {
+module aks './nested/aks.bicep' = {
   name: 'aks_deployment'
   params: {
     clusterName: clusterName
@@ -40,7 +45,7 @@ module aks 'nested/aks.bicep' = {
   }
 }
 
-module mysql 'nested/mysql.bicep' = {
+module mysql './nested/mysql.bicep' = {
   name: 'mysql_deployment'
   params: {
     serverName: serverName

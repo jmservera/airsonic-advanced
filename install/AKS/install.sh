@@ -492,7 +492,7 @@ prepare_sql() {
 #   Writes to stdout
 ###############################################
 deploy_to_aks() {
-    pushd templates
+    pushd k8s
 
     echo "[${FUNCNAME[0]}] Create namespace"
     envsubst <ns.yaml | kubectl apply -f -
