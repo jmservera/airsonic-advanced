@@ -26,15 +26,13 @@ provide the credentials to the application using [identity federation][oidc].
 Let's use this two features to connect our application to our database without
 having to store any credentials in our code or in our cluster.
 
-![Airsonic app with no password in the JDBC config][airsonic_no_pwd]
-
-## What will we need to do?
+## Summary
 
 There are two parts in this exercise: setup the database to allow the connection
 with the Managed Identity, and configure the Kubernetes cluster to allow the
 connection from the application to the database.
 
-For the database part, you will need to have a Managed Identity that will be
+For the database, you will need to have a Managed Identity that will be
 used to configure the AAD authentication in the database. This MI is not the
 same as the one that will be used in the application, and it needs a special
 permission to be able to configure the database. The steps to provide these
@@ -43,7 +41,7 @@ permissions are documented in this article:
 but don't worry, we will go through them in this article too, and using the new
 *Microsoft.MgGraph* PowerShell module.
 
-Then you will need to have an AKS cluster with the Workload Identity enabled.
+Then you need to have an AKS cluster with the Workload Identity enabled.
 This is a feature that is still in preview, and you will need to enable it in
 your cluster. The steps to enable it are documented in this article:
 [Use managed identities in Azure Kubernetes Service][aks-wi].
@@ -59,20 +57,26 @@ So here's the bill of materials of what we will use in this example:
 
 ## Transforming a Spring Boot Application to use passwordless MySQL
 
-We will follow the steps to transform existing instances of MySQL and AKS, but I
-also provide some templates to create this initial state. So, you may find that
-the initial templates are rather simple. Keep in mind that are only some basic
-boilerplate templates to use them as a starting point.
+In this article we will follow the steps to transform an existing instance of
+MySQL and an existing AKS cluster. If you want to follow this exercise yourself,
+I also provide some templates to create this initial state. You may find that
+the initial templates are rather simple, but keep in mind that these are only
+some basic boilerplate templates to use them as a starting point.
 
 In this example we will use a Spring Boot application that uses a MySQL
 database. The application is a fork of the [Airsonic Advanced][airsonic]
-project, a music streaming server with a long story.
+project, a music streaming server with a long story, and I find it useful for
+this exercise because you can edit and see the database connection in their own
+UI:
 
-In the `install/k8s` folder you will find all the scripts and templates to
-build and deploy the application to an AKS cluster. I also included all the
-steps to install powershell in Linux, and the needed extensions for the `az` cli
-and the PowerShell modules. You can clone the repository and checkout the branch
-`azure_passwordless` to get the code for this example:
+![Airsonic app with no password in the JDBC config][airsonic_no_pwd]
+
+In the `install/k8s` folder of my [airsonic fork][airsonic] you will find all
+the scripts and templates to build and deploy the application to an AKS cluster.
+I also included all the steps to install powershell in Linux, and the needed
+extensions for the `az` cli and the PowerShell modules. You can clone the
+repository and checkout the branch `azure_passwordless` to get the code for this
+example:
 
 ```bash
 git clone "https://github.com/jmservera/airsonic-advanced.git" -b azure_passwordless
@@ -264,7 +268,7 @@ connection string:
 </dependency>
 ```
 
-#### It's the Namespace!
+#### Check the namespace twice
 
 The last mistake was that I was using the wrong namespace. I was creating too
 many things manually and I was creating the deployment in the application
@@ -310,13 +314,14 @@ az identity federated-credential create --name ${FEDERATED_IDENTITY_CREDENTIAL_N
 ## References
 
 * [Migrate MySQL to passwordless connection][passwordless-mysql]
-* https://techcommunity.microsoft.com/t5/azure-database-for-mysql-blog/azure-ad-authentication-for-mysql-flexible-server-from-end-to/ba-p/3696353
-* https://learn.microsoft.com/azure/aks/workload-identity-overview
-* intro: https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/overview
+* [Azure AD authentication for MySql Flexible Server][aadauth-mysql]
+* [AKS Workload Identity Overview][aks-wi]
+* [Managed Identities introduction][managed-identities]
 
 [aadauth-mysql]: https://techcommunity.microsoft.com/t5/azure-database-for-mysql-blog/azure-ad-authentication-for-mysql-flexible-server-from-end-to/ba-p/3696353
 [airsonic]: https://github.com/jmservera/airsonic-advanced/tree/azure_passwordless
 [aks-wi]: https://learn.microsoft.com/azure/aks/workload-identity-overview
+[managed-identities]: https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/overview
 [oidc]:https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#service-account-issuer-discovery
 [openjdk]: https://jdk.java.net/archive/
 [passwordless-mysql]: https://learn.microsoft.com/azure/developer/java/spring-framework/migrate-mysql-to-passwordless-connection
@@ -325,4 +330,4 @@ az identity federated-credential create --name ${FEDERATED_IDENTITY_CREDENTIAL_N
 [temurin]: https://hub.docker.com/_/eclipse-temurin
 [workload-identity]: https://learn.microsoft.com/azure/aks/workload-identity-overview
 
-[airsonic_no_pwd]: ./img/look_ma_no_passwords.png "Look ma. No passwords!"
+[airsonic_no_pwd]: ./img/look_ma_no_passwords.png "Look Ma! No passwords!"
