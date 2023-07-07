@@ -157,3 +157,4 @@ local.properties
 .recommenders/
 install/k8s/.env
 install/k8s/.env.old
+install/aks/.env.withvars

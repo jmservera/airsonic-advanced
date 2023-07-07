@@ -15,13 +15,18 @@ Additionally, when running your application in an AKS cluster, you can utilize [
 
 In this article, we will combine these two features to connect our application to the MySQL database without the need to store any credentials in the code or the cluster.
 
-## Summary
+### Summary
 
-This exercise consists of two parts: setting up the database to allow the connection with the Managed Identity, and configuring the Kubernetes cluster to enable the application's connection to the database.
+This exercise consists of two parts:
+
+1. Setting up the database to allow the connection with the Managed Identity, and
+2. configuring the Kubernetes cluster to enable the application's connection to the database.
 
 For the database setup, you need a Managed Identity with special permissions to configure the AAD authentication in the database. The article [Azure AD authentication for MySQL Flexible Server from end to end][aadauth-mysql] provides the steps to grant these permissions, we will follow them using the new Microsoft.MgGraph PowerShell module.
 
 To prepare the Kubernetes cluster, you need to enable the Workload Identity feature, which is currently in preview. The article [Use managed identities in Azure Kubernetes Service][aks-wi] explains how to enable this feature in your AKS cluster.
+
+### Prerequisites
 
 Before proceeding, make sure you have the following prerequisites:
 
@@ -72,9 +77,9 @@ LOCATION="westeurope" # Will only be used if you create a new resource group
 ```
 
 > **TL;DR:** If you want to skip the explanation and go directly to the code,
-you can run the `install/k8s/install.sh` script. I tried to made it idempotent,
-so you can try different things and run it again if anything failed because of
-the credentials. You only need to run it from *bash* and it will take care of
+you can run the `install/k8s/install.sh` script. I tried to make it idempotent,
+so you can try different things and run it again if anything failed (ex: setting
+the right credentials is particularly difficult). You only need to run it from *bash* and it will take care of
 installing everything you need to run the scripts.
 If you already have the basic resources created (ACR, AKS and MySQL) you can
 skip the creation by adding the *-d* flag to the `install.sh` script. Otherwise,
@@ -82,7 +87,7 @@ the script will create them for you.
 
 ### Building the application
 
-As I said before, there will be no code changes, but we must update the
+As I said before, there will be no direct code changes, but we must update the
 application references and configuration to add support for passwordless MySQL.
 This application uses Spring Boot, so I added the Spring Cloud Azure JDBC
 dependency to the [`pom.xml`][pomxml] file:
@@ -92,11 +97,14 @@ dependency to the [`pom.xml`][pomxml] file:
     <groupId>com.azure.spring</groupId>
     <artifactId>spring-cloud-azure-starter-jdbc-mysql</artifactId>
     <version>5.1.0</version>
+    <scope>runtime</scope>
 </dependency>
 ```
 
+> Notice that we use the scope `runtime` so it is included in the .jar file but we are not using it directly into the code, it's just referenced in the database connection string.
+
 The project comes with an already prepared Dockerfile, but I also had to update
-to a newer version of the OpenJDK image to use Java 17 because adoptopenjdk is
+to a newer version of the OpenJDK image to use Java 17 because the repository *adoptopenjdk* is
 not providing images for Java 17 anymore. I chose to use the
 [Eclipse Temurin][temurin] images, which are the official images for OpenJDK.
 
@@ -117,7 +125,7 @@ this command to build the application:
 mvn clean package -DskipTests -P docker
 ```
 
-You can also use docker to build the application:
+You can also use docker to build the application if you don't want to install too many things in your machine:
 
 ```bash
 docker run -it --rm --workdir /src \
@@ -145,11 +153,25 @@ docker tag airsonicadvanced/airsonic-advanced:latest \
 docker push -a ${ACR_NAME}.azurecr.io/airsonic-advanced
 ```
 
+Now this version of the application is ready to connect to MySQL Flexible Server with a Managed Identity.
+
+## Prepare the identities
+
+We need two user managed identities for this example, one for the application and another one that is used by the MySQL server itself for connecting to the Graph API to manage the users.
+
+This special Managed Identity needs to have a specific set of permissions in the Graph API that we will need to grant from a Global Admin user:
+
+```powershell
+
+```
+
 ## Prepare the database
 
-Before deploying the application, we need to prepare the database. Here are the steps to follow:
+Before the application can use a managed identity to connect to the database, we also need to prepare the database server by creating the user for the identity. Here are the steps to follow:
 
-* **Setup firewall:** Make sure that the firewall is configured to allow traffic to the database server. You can do this by adding a rule to the firewall to allow traffic on the port used by the database server.
+* **Setup firewall:** Make sure that the firewall is configured to allow traffic to the database server.
+
+* **Update the admin user with an AAD one**: We need to update the admin user of the database server to an Azure Active Directory user. This will allow us to create a user for our Identity.
 
 * **Connect with token:** To connect to the database, we will use a token instead of a password. You can create a token by following the instructions in the Azure portal.
 
